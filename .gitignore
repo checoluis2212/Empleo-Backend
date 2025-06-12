@@ -1,0 +1,15 @@
+# Node modules
+node_modules/
+
+# Archivos de credenciales y variables de entorno
+.env
+src/config/firebase-service-account.json
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Archivos de logs y debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
