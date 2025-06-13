@@ -3,15 +3,9 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
+const { nanoid } = require('nanoid'); // <--- Usa nanoid
 const { db } = require('../config/firebaseAdmin');
 const { generateToken } = require('../utils/jwt');
-
-/**
- * Estructura en Firestore:
- * Colección: users
- * Documento con ID = email (por simplicidad). 
- * Campos: { passwordHash: string, role: "CANDIDATE" | "RECRUITER", createdAt: Timestamp }
- */
 
 /**
  * POST /api/auth/register
@@ -31,10 +25,10 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Rol inválido' });
     }
 
-    // 1) Verificar si el usuario ya existe en Firestore
-    const userRef = db.collection('users').doc(email);
-    const userDoc = await userRef.get();
-    if (userDoc.exists) {
+    // 1) Buscar si ya existe un usuario con este email
+    const usersRef = db.collection('users');
+    const existingQuery = await usersRef.where('email', '==', email).limit(1).get();
+    if (!existingQuery.empty) {
       return res.status(409).json({ error: 'Usuario ya registrado' });
     }
 
@@ -42,17 +36,23 @@ router.post('/register', async (req, res) => {
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // 3) Crear el documento en Firestore
+    // 3) Generar un id amigable de 5 caracteres
+    const userId = nanoid(5);
+
+    // 4) Crear el documento en Firestore
     const now = new Date();
-    await userRef.set({
+    await usersRef.doc(userId).set({
+      id: userId,
+      email,
       passwordHash,
       role,
-      createdAt: now
+      createdAt: now,
+      applications: 0 // contador de postulaciones (opcional)
     });
 
-    // 4) Generar el token JWT
-    const token = generateToken({ uid: email, role });
-    return res.status(201).json({ token, role });
+    // 5) Generar el token JWT
+    const token = generateToken({ uid: userId, role });
+    return res.status(201).json({ token, role, uid: userId });
 
   } catch (err) {
     console.error('Error en /register:', err);
@@ -74,13 +74,14 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email y contraseña requeridos' });
     }
 
-    // 1) Buscar el documento del usuario en Firestore
-    const userRef = db.collection('users').doc(email);
-    const userDoc = await userRef.get();
-    if (!userDoc.exists) {
+    // 1) Buscar usuario por email (ya NO por documentId)
+    const usersRef = db.collection('users');
+    const querySnap = await usersRef.where('email', '==', email).limit(1).get();
+    if (querySnap.empty) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
-    const userData = userDoc.data(); // { passwordHash, role, createdAt }
+    const userDoc = querySnap.docs[0];
+    const userData = userDoc.data();
 
     // 2) Comparar la contraseña
     const match = await bcrypt.compare(password, userData.passwordHash);
@@ -88,9 +89,9 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
-    // 3) Generar token
-    const token = generateToken({ uid: email, role: userData.role });
-    return res.json({ token, role: userData.role });
+    // 3) Generar token con el id amigable
+    const token = generateToken({ uid: userData.id, role: userData.role });
+    return res.json({ token, role: userData.role, uid: userData.id });
 
   } catch (err) {
     console.error('Error en /login:', err);

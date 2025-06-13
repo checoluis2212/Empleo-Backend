@@ -1,3 +1,5 @@
+// ── src/routes/vacancies.js ─────────────────────────────────────────────
+
 const express = require('express');
 const router = express.Router();
 const { db } = require('../config/firebaseAdmin');
@@ -16,6 +18,8 @@ router.post('/', ensureAuth, async (req, res) => {
       return res.status(400).json({ error: 'Faltan campos obligatorios' });
     }
     const now = admin.firestore.Timestamp.fromDate(new Date());
+
+    // 1. Agrega la vacante (Firestore genera el documentId)
     const newVacRef = await db.collection('vacancies').add({
       title,
       company,
@@ -23,9 +27,16 @@ router.post('/', ensureAuth, async (req, res) => {
       description,
       recruiterId: uid,
       createdAt: now,
+      // No pongas vacancyId aquí aún
     });
+
+    // 2. Actualiza el documento para agregar el campo vacancyId
+    await newVacRef.update({ vacancyId: newVacRef.id });
+
+    // 3. Obtén los datos actualizados
     const newDoc = await newVacRef.get();
     return res.status(201).json({ id: newDoc.id, ...newDoc.data() });
+
   } catch (err) {
     console.error('Error POST /vacancies:', err);
     return res.status(500).json({ error: 'Error al crear vacante' });

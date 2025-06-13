@@ -1,10 +1,12 @@
+// src/routes/applications.js
+
 const express = require('express');
 const router = express.Router();
 const { db } = require('../config/firebaseAdmin');
 const { ensureAuth } = require('../middlewares/auth');
 const admin = require('firebase-admin');
 
-// Candidato se postula
+// POSTULARSE (solo una vez)
 router.post('/', ensureAuth, async (req, res) => {
   try {
     const { uid, role } = req.user;
@@ -15,6 +17,19 @@ router.post('/', ensureAuth, async (req, res) => {
     if (!vacancyId || !resumeUrl) {
       return res.status(400).json({ error: 'Faltan campos obligatorios' });
     }
+
+    // 1. Checar si ya existe postulación para ese usuario y vacante
+    const duplicateSnap = await db.collection('applications')
+      .where('userId', '==', uid)
+      .where('vacancyId', '==', vacancyId)
+      .limit(1)
+      .get();
+
+    if (!duplicateSnap.empty) {
+      // En vez de error crítico, responde con mensaje y 409 (opcional)
+      return res.status(409).json({ error: 'Ya te postulaste a esta vacante' });
+    }
+
     const now = admin.firestore.Timestamp.fromDate(new Date());
     const newAppRef = await db.collection('applications').add({
       vacancyId,
@@ -31,7 +46,7 @@ router.post('/', ensureAuth, async (req, res) => {
   }
 });
 
-// El candidato ve sus postulaciones
+// LISTAR POSTULACIONES DEL USUARIO
 router.get('/', ensureAuth, async (req, res) => {
   try {
     const { uid, role } = req.user;
@@ -71,69 +86,6 @@ router.get('/', ensureAuth, async (req, res) => {
   } catch (err) {
     console.error('Error GET /applications:', err);
     return res.status(500).json({ error: 'Error al obtener postulaciones' });
-  }
-});
-
-// El recruiter ve postulaciones recibidas en sus vacantes
-router.get('/recruiter', ensureAuth, async (req, res) => {
-  try {
-    const { uid, role } = req.user;
-    if (role !== 'RECRUITER') {
-      return res.status(403).json({ error: 'Solo reclutadores pueden ver esto' });
-    }
-
-    // Obtener ids de vacantes de este recruiter
-    const vacSnap = await db.collection('vacancies')
-      .where('recruiterId', '==', uid)
-      .get();
-
-    const vacIds = vacSnap.docs.map(doc => doc.id);
-
-    if (!vacIds.length) return res.json([]);
-
-    // Buscar todas las aplicaciones de esas vacantes
-    const appsSnap = await db.collection('applications')
-      .where('vacancyId', 'in', vacIds.slice(0, 10)) // Firestore permite máx 10 por "in"
-      .get();
-
-    const apps = [];
-    for (const doc of appsSnap.docs) {
-      const data = doc.data();
-      let vacancy = null;
-      try {
-        const v = vacSnap.docs.find(vac => vac.id === data.vacancyId);
-        if (v) vacancy = v.data();
-      } catch (_) { vacancy = null; }
-
-      apps.push({
-        id: doc.id,
-        ...data,
-        vacancy,
-        createdAt: data.createdAt && data.createdAt.toDate()
-      });
-    }
-    res.json(apps);
-  } catch (err) {
-    console.error('Error GET /applications/recruiter:', err);
-    res.status(500).json({ error: 'Error al obtener postulaciones' });
-  }
-});
-
-// Cambiar estado de una postulación (recruiter)
-router.patch('/:id', ensureAuth, async (req, res) => {
-  try {
-    const { role } = req.user;
-    if (role !== 'RECRUITER') {
-      return res.status(403).json({ error: 'Solo reclutadores pueden cambiar estado' });
-    }
-    const { id } = req.params;
-    const { status } = req.body;
-    if (!status) return res.status(400).json({ error: 'Falta estado' });
-    await db.collection('applications').doc(id).update({ status });
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Error PATCH /applications/:id:', err);
-    res.status(500).json({ error: 'Error al actualizar estado' });
   }
 });
 
